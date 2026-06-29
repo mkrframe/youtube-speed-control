@@ -1,6 +1,6 @@
 {
   "name": "Youtube Playback Speed Control (mkr fork)",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "manifest_version": 3,
   "author": "mkrframe (fork of Toxblh's Youtube Speed Control)",
   "description": "Control speed of the youtube playback using a keyboard. Press '+' to increase and '-' to decrease the playback speed. Fork of Toxblh/youtube-speed-control.",
