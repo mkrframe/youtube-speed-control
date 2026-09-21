@@ -189,6 +189,8 @@ browser.runtime.sendMessage({}, function (o) {
         function mountIntoPlayerControls() {
           var rightControls = document.querySelector('.ytp-right-controls')
           if (rightControls) {
+            const alreadyExists = [...rightControls.children].some(c => c.id === 'PlayBackRatePanel')
+            if (alreadyExists) return true;
             rightControls.insertBefore(box, rightControls.firstChild)
             return true
           }
