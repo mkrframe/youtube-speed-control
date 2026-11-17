@@ -1,4 +1,4 @@
-browser.runtime.sendMessage({}, function (o) {
+(function () {
   /**
    * Enum string values.
    * @enum {string}
@@ -98,11 +98,20 @@ browser.runtime.sendMessage({}, function (o) {
       }
 
       state.videoController.prototype.initializeControls = function () {
+        if (this.moveObserver) {
+          this.moveObserver.disconnect()
+          this.moveObserver = null
+        }
+        if (this.box) {
+          this.box.remove()
+        }
+
         var docFragment = document.createDocumentFragment()
 
         var box = document.createElement('div')
         box.setAttribute('id', 'PlayBackRatePanel')
         box.className = 'PlayBackRatePanel'
+        this.box = box
 
         var btnRateView = document.createElement('button')
         btnRateView.setAttribute('id', 'PlayBackRate')
@@ -187,10 +196,12 @@ browser.runtime.sendMessage({}, function (o) {
 
         var self = this
         function mountIntoPlayerControls() {
-          var rightControls = document.querySelector('.ytp-right-controls')
+          var player = self.video.closest('.html5-video-player')
+          var rightControls = player && player.querySelector('.ytp-right-controls')
           if (rightControls) {
-            const alreadyExists = [...rightControls.children].some(c => c.id === 'PlayBackRatePanel')
-            if (alreadyExists) return true;
+            player.querySelectorAll('#PlayBackRatePanel').forEach(function (old) {
+              if (old !== box) old.remove()
+            })
             rightControls.insertBefore(box, rightControls.firstChild)
             return true
           }
@@ -199,17 +210,23 @@ browser.runtime.sendMessage({}, function (o) {
 
         if (inPlayerControls) {
           if (!mountIntoPlayerControls()) {
-            // Fallback to default location until the player controls appear,
-            // then move it into place.
-            this.video.parentElement.parentElement.insertBefore(docFragment, this.video.parentElement)
+            // The player controls are not there yet: wait for them, then
+            // mount the panel.
             var moveObserver = new MutationObserver(function () {
               if (mountIntoPlayerControls()) {
-                moveObserver.disconnect()
+                stopWaiting()
               }
             })
+            var stopWaiting = function () {
+              moveObserver.disconnect()
+              if (self.moveObserver === moveObserver) {
+                self.moveObserver = null
+              }
+            }
+            this.moveObserver = moveObserver
             moveObserver.observe(document.documentElement, { childList: true, subtree: true })
             // Safety stop after 30s.
-            setTimeout(function () { moveObserver.disconnect() }, 30000)
+            setTimeout(stopWaiting, 30000)
           }
         } else {
           this.video.parentElement.parentElement.insertBefore(docFragment, this.video.parentElement)
@@ -311,7 +328,7 @@ browser.runtime.sendMessage({}, function (o) {
             }
             if (action === RATE_ACTIONS.RESET) {
               if (getStateSpeed() === 100) {
-                newSpeed = state.resetedSpeed
+                newSpeed = state.resetedSpeed || 100
               } else {
                 state.resetedSpeed = getStateSpeed()
                 newSpeed = 100
@@ -323,6 +340,7 @@ browser.runtime.sendMessage({}, function (o) {
         }
 
         var box = document.getElementById('PlayBackRatePanel')
+        if (!box) return
         var savedStyleDisplay = box.style.display
         if (savedStyleDisplay === 'none') {
           box.style.display = 'inline'
@@ -348,28 +366,23 @@ browser.runtime.sendMessage({}, function (o) {
         }
       }
 
-      var processedVideos = new WeakSet()
+      var controllers = new WeakMap()
 
       function attachController(videoElem) {
-        if (!videoElem || processedVideos.has(videoElem)) {
-          // Video already processed; if the panel got removed by YouTube's
-          // SPA re-rendering, re-inject it.
-          if (
-            videoElem &&
-            videoElem.parentElement &&
-            videoElem.parentElement.parentElement &&
-            !videoElem.parentElement.parentElement.querySelector('#PlayBackRatePanel')
-          ) {
-            processedVideos.delete(videoElem)
-          } else {
-            return
-          }
-        }
-        if (!videoElem.parentElement || !videoElem.parentElement.parentElement) {
+        if (!videoElem || !videoElem.parentElement || !videoElem.parentElement.parentElement) {
           return
         }
-        processedVideos.add(videoElem)
-        new state.videoController(videoElem)
+        var controller = controllers.get(videoElem)
+        if (!controller) {
+          controllers.set(videoElem, new state.videoController(videoElem))
+          return
+        }
+        // Video already processed; if the panel got removed by YouTube's
+        // SPA re-rendering, re-inject it.
+        var host = videoElem.closest('.html5-video-player') || videoElem.parentElement.parentElement
+        if (!controller.moveObserver && !host.querySelector('#PlayBackRatePanel')) {
+          controller.initializeControls()
+        }
       }
 
       function scanForVideos(root) {
@@ -393,33 +406,48 @@ browser.runtime.sendMessage({}, function (o) {
         }
       })
 
+      var KEY_CODE_BY_SYMBOL = { '*': '106', '+': '107', '-': '109', '/': '111', '#': '35' }
+
+      function matchesKey(setting, e) {
+        var codes = String(setting).split(',')
+        return codes.indexOf(String(e.keyCode)) !== -1 || codes.indexOf(KEY_CODE_BY_SYMBOL[e.key]) !== -1
+      }
+
       function handleKeyDown(e) {
-        var keyPressed = e.which
+        var active = document.activeElement
         if (
-          document.activeElement.nodeName === 'INPUT' &&
-          document.activeElement.getAttribute('type') === 'text'
+          e.ctrlKey ||
+          e.altKey ||
+          e.metaKey ||
+          (active && (active.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(active.nodeName)))
         ) {
           return false
         }
 
-        if (state.settings.fasterKeyCode.match(new RegExp('(?:^|,)' + keyPressed + '(?:,|$)'))) {
-          changeRate(RATE_ACTIONS.FASTER)
-        } else if (state.settings.slowerKeyCode.match(new RegExp('(?:^|,)' + keyPressed + '(?:,|$)'))) {
-          changeRate(RATE_ACTIONS.SLOWER)
-        } else if (state.settings.resetKeyCode.match(new RegExp('(?:^|,)' + keyPressed + '(?:,|$)'))) {
-          changeRate(RATE_ACTIONS.RESET)
+        var action
+        if (matchesKey(state.settings.fasterKeyCode, e)) {
+          action = RATE_ACTIONS.FASTER
+        } else if (matchesKey(state.settings.slowerKeyCode, e)) {
+          action = RATE_ACTIONS.SLOWER
+        } else if (matchesKey(state.settings.resetKeyCode, e)) {
+          action = RATE_ACTIONS.RESET
+        }
+
+        if (action) {
+          changeRate(action)
+          e.preventDefault()
+          e.stopPropagation()
         }
 
         return false
       }
 
       function onFullscreen() {
-        var box = document.getElementById('PlayBackRatePanel')
-        if (document.fullscreenElement !== null) {
-          box.className = 'PlayBackRatePanelFullScreen'
-        } else {
-          box.className = 'PlayBackRatePanel'
-        }
+        var fullscreen = document.fullscreenElement !== null
+        document.querySelectorAll('#PlayBackRatePanel').forEach(function (box) {
+          if (box.classList.contains('PlayBackRatePanelInPlayer')) return
+          box.className = fullscreen ? 'PlayBackRatePanelFullScreen' : 'PlayBackRatePanel'
+        })
       }
 
       if (state.settings.allowMouseWheel) {
@@ -446,6 +474,4 @@ browser.runtime.sendMessage({}, function (o) {
       scanForVideos()
     }
   }
-})
-
-browser.runtime.sendMessage('show_page_action')
+})()

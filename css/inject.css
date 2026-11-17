@@ -130,15 +130,6 @@
   border: 0;
 }
 
-.PlayBackRatePanelInPlayer .ysc-btn-preset {
-  background: rgba(0, 0, 0, 0.4);
-  border: 0;
-}
-
-.PlayBackRatePanelInPlayer .ysc-btn-preset:hover {
-  background: rgba(255, 255, 255, 0.2);
-}
-
 .PlayBackRatePanelInPlayer #SpeedDown,
 .PlayBackRatePanelInPlayer #SpeedUp {
   float: none;
