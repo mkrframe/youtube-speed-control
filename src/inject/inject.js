@@ -135,7 +135,7 @@
           var b = document.createElement('button')
           b.setAttribute('data-ysc-preset', String(s))
           b.className = 'ysc-btn ysc-btn-preset'
-          b.textContent = s.toFixed(s % 1 === 0 ? 0 : 1) + 'x'
+          b.textContent = s + 'x'
           return b
         })
 
